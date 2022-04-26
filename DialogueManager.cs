@@ -1,5 +1,5 @@
 ﻿//TODO: Shops should be opened via choices in dialogue (Buy vs sell choice buttons)
-//TODO: EITHER DO THIS OR DIR
+//TODO: everything is messed up lol so much redddddd
 
 using System;
 using System.Collections;
