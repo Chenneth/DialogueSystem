@@ -12,7 +12,7 @@ namespace Dialogue_Scripts
         private enum ScriptType
         {
             playwright = 0,
-            
+            //todo: fill this out with different formats
         }
 
         private static Dictionary<string, ScriptType> stringToScriptType = new Dictionary<string, ScriptType>
@@ -26,6 +26,9 @@ namespace Dialogue_Scripts
         private int _currentScriptIndex = 0;
         public Dictionary<string, string[]> characterInfo;
         private ScriptType _scriptType;
+        private static DialogueNode EoD = new DialogueNode("EoD","EoD");
+        private string _fileType;
+        // public List<string> 
         
         /*The filepath must be in the assets folder because idk...*/
         //todo: make a system so you can set it up in the Inspector in Unity
@@ -47,26 +50,67 @@ namespace Dialogue_Scripts
         private void SetUpArray(TextAsset file)
         {
             _script = file.ToString().Split('\n');
+            RemoveComments();
             if (_script.Length < 1)
-                root = new DialogueNode("ERROR", "THERE ARE NO LINES IN THE FILE\n");
-            //ignore any starting comments
-            while (_script[_currentScriptIndex][0] == '#')
             {
-                _currentScriptIndex++;
+                SetRootError("THERE ARE NO LINES IN THE FILE/");
+                return;
+            }
+            
+
+            string typeLine = _script[_currentScriptIndex++];//go to next line since we won't be reading this again
+            if (typeLine.Length < 4 || typeLine.Substring(0, 4) != "TYPE")
+            {
+                SetRootError("FIRST LINE IS NOT A SCRIPT TYPE DEFINITION.");//shit code but oh well
+                return;
             }
 
-            if (_script[_currentScriptIndex].Substring(0, 4) != "TYPE")
-                root = new DialogueNode("ERROR", "PARSING ERROR, FIRST LINE MUST BE THE SCRIPT TYPE.\n");
+            // int lastSpace = typeLine.LastIndexOf(' ');
+            int startIndex = typeLine.IndexOf('=');
+            string typeName = typeLine.Substring(startIndex,typeLine.Length-startIndex);
+            typeName = new string(typeName.Where(c => !char.IsWhiteSpace(c)).ToArray());
+            typeName = typeName.Replace("=", "");//is this necessary? todo
+            if(!stringToScriptType.ContainsKey(typeName))
+            {
+                SetRootError("NOT A VALID SCRIPT TYPE.");
+                return;
+            }
             
-            _scriptType = 
-            
+            _scriptType = stringToScriptType[typeName];
+            string imageType = _script[_currentScriptIndex];
+            if (imageType.Length < 21 || imageType.Substring(0,19)!="EXPRESSION_FILETYPE")
+                _fileType = ".jpg";//jpg ftw jpg artifactingllololololo
+            else
+            {
+                startIndex = imageType.IndexOf('=');
+                _fileType = imageType.Substring(startIndex);
+                _fileType = _fileType.Replace(" ", "");
+                _fileType = _fileType.Replace("=", "");//todo same as line 71
+                _currentScriptIndex++;
+            }
             //begin parsing file
-            
+            switch (_scriptType)
+            {
+                case ScriptType.playwright:
+                    MakeTreePlaywright();
+                    break;
+            }
         }
         
         private void MakeTreePlaywright()
         {
             
+        }
+
+        private void SetRootError(string messsage)
+        {
+            root = new DialogueNode("ERROR", messsage);
+        }
+
+        //technically removes blank lines too... shhhhhhhh
+        private void RemoveComments()
+        {
+            _script = _script.Where(x => x[0] == '#'||x.Length<1).ToArray();
         }
         
     }
