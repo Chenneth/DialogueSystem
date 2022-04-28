@@ -1,14 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
+using Unity.VisualScripting;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 
 namespace Dialogue_Scripts
 {
-
+    
     public class DialogueTree
     {
+        public const bool descriptiveDebug = true;
         private enum ScriptType
         {
             playwright = 0,
@@ -20,49 +23,69 @@ namespace Dialogue_Scripts
                 {"PLAYWRIGHT", ScriptType.playwright},
             }
             ;
-        
-        public DialogueNode root;
+
+        public Dictionary<string, RootNode> roots;
         private string[] _script;
         private int _currentScriptIndex = 0;
-        public Dictionary<string, string[]> characterInfo;
+        //key: character name
+        //value: character description, character filepath
+        public Dictionary<string, string[]> charactersInformation;
         private ScriptType _scriptType;
         private static DialogueNode EoD = new DialogueNode("EoD","EoD");
         private string _fileType;
+
+        public static string DefaultDescription = "";
         // public List<string> 
         
         /*The filepath must be in the assets folder because idk...*/
         //todo: make a system so you can set it up in the Inspector in Unity
         //Like I'll ever get to that :(
+        //todo: decide how to get this file (I am incredibly lazy)
         public DialogueTree(string filePath)
         {
-            characterInfo = new Dictionary<string, string[]>(10);
-            
+            charactersInformation = new Dictionary<string, string[]>(10);
+            roots = new Dictionary<string, RootNode>(3);
             
         }
 
         public DialogueTree(UnityEngine.TextAsset file)
         {
-            characterInfo = new Dictionary<string, string[]>(10);
+            charactersInformation = new Dictionary<string, string[]>(10);
+            roots = new Dictionary<string, RootNode>(3);
             SetUpArray(file);                
-           
+            
         }
 
         private void SetUpArray(TextAsset file)
         {
-            _script = file.ToString().Split('\n');
-            RemoveComments();
+            //splits the file into strings delimited by the newline character, with all lines starting with a "#" and blank lines removed.
+            
+            // _script = file.ToString().Split('\n').Where(x=>x[0]!='#'||x.Length==0).ToArray();
+            //todo: test this regex removal
+            _script = Regex.Replace(file.ToString(), @"#.*[\n]","\n").Split('\n');
+            //I have no idea if this properly replaces the things (it should though)
+            if(descriptiveDebug)
+            {
+                Debug.Log($"Script length is {_script.Length}.");
+                foreach (string line in _script)
+                {
+                    Debug.Log(line);
+                }
+            }
+            
+            
             if (_script.Length < 1)
             {
-                SetRootError("THERE ARE NO LINES IN THE FILE/");
-                return;
+                throw new UnityException("There are no lines in the file.");
             }
             
 
             string typeLine = _script[_currentScriptIndex++];//go to next line since we won't be reading this again
             if (typeLine.Length < 4 || typeLine.Substring(0, 4) != "TYPE")
             {
-                SetRootError("FIRST LINE IS NOT A SCRIPT TYPE DEFINITION.");//shit code but oh well
-                return;
+                throw new UnityException($"First line must be the type of script this script is. Line was\n" +
+                                         $"{typeLine}");
+                //i guess i could make it recognize the script type... if I actually took language processing courses that is :(
             }
 
             // int lastSpace = typeLine.LastIndexOf(' ');
@@ -72,8 +95,7 @@ namespace Dialogue_Scripts
             typeName = typeName.Replace("=", "");//is this necessary? todo
             if(!stringToScriptType.ContainsKey(typeName))
             {
-                SetRootError("NOT A VALID SCRIPT TYPE.");
-                return;
+                throw new UnityException($"Not a valid script type. Found {typeName}");
             }
             
             _scriptType = stringToScriptType[typeName];
@@ -99,28 +121,114 @@ namespace Dialogue_Scripts
         
         private void MakeTreePlaywright()
         {
+            string curLine = _script[_currentScriptIndex++];
+            if(!curLine.StartsWith(":START ")||!curLine.EndsWith("'Characters in the Play':"))
+            {
+                throw new UnityException(
+                    $"First line after the image type or script type must be the 'Characters in the Play' header. Found {curLine}");
+            }
+            PlayWrightFindCharacters(ref curLine);
+            if(!curLine.StartsWith(":START "))
+                throw new UnityException($"Script error. Expected line {_currentScriptIndex} to start with " +
+                                         $"\":Start\" but found {curLine} instead.");
+            Match match = Regex.Match(curLine, @"['](.*?)[']");
+            if(match.Success)
+                AddScene(match.Groups[0].ToString());
+            else
+            {
+                throw new UnityException("I like throwing these exceptions instead of writing to the console.");
+            }
             
         }
 
-        private void SetRootError(string messsage)
+        //_curScriptIndex will be set to the next unread line after this function ends :)
+        private void PlayWrightFindCharacters(ref string curLine)
         {
-            root = new DialogueNode("ERROR", messsage);
-        }
+            curLine = _script[_currentScriptIndex++];
+            while (!curLine.Equals(":END 'Characters in the Play'"))
+            {
+                string[] charInfo = curLine.Split(",");
+                if (descriptiveDebug)
+                {
+                    Debug.Log($"Item split into {charInfo.Length} elements. Item is {curLine}. Outputting each element.");
+                    foreach (string str in charInfo)
+                    {
+                        Debug.Log(str);
+                    }
+                }
 
-        //technically removes blank lines too... shhhhhhhh
-        private void RemoveComments()
-        {
-            _script = _script.Where(x => x[0] == '#'||x.Length<1).ToArray();
+                string description = String.IsNullOrWhiteSpace(charInfo[1]) || String.IsNullOrEmpty(charInfo[1])
+                    ? DefaultDescription
+                    : charInfo[1];
+                string filePath;
+                if (charInfo.Length < 3) //if no filepath was given
+                {
+                    //todo: search for assetbundle (i'm too lazy to do this rn) 
+                    filePath = "";
+                }
+                else //filepath was given and we can set filePath to it
+                {
+                    filePath = charInfo[2];
+                }
+                
+                //add the character's stuff into the thingy ma-bob
+                //todo: this doesnt work with assetbundles probably because the bundle itself should be in the filepath
+                charactersInformation.Add(
+                    charInfo[0],new string[]{
+                    description,
+                    filePath
+                });
+                curLine = _script[_currentScriptIndex++];
+            }
         }
-        
+        /*private void SetRootError(string messsage)
+        {
+            roots.Add("START_SCENE", new DialogueNode("ERROR",messsage));
+        }*/
+
+        //function is recursive for any sub-sections users decide to input (much to my dismay)
+        private void AddScene(string sceneName)
+        {
+            if(descriptiveDebug)
+                Debug.Log("Creating scene titled " + sceneName);
+            //first line of the scene should be a character name
+            string curLine = _script[_currentScriptIndex++];
+            if(descriptiveDebug)
+                Debug.Log($"First character name is " + curLine);
+            string name, line, expression;
+            NodeType curNode = new RootNode();
+            roots.Add(sceneName,(RootNode)curNode);
+            /*Would it be better to have this be an equals? I wanted it to end the check sooner so as to not hog too much resources.
+             * The question is, "Is there an instance where :END will not refer to the current section?"
+             * I do not think so, due to the recursive nature of this program.
+             */
+            while /*(!curLine.StartsWith(":END")*/true)
+            {
+                //todo: just check the loop condition at the end after updating curLine so we can also check for new scene starting
+            }
+        }
     }
     
     /*The general dialogue line. This is for lines that lead to another line (as opposed to a choice)*/
     public class DialogueNode : NodeType
     {
         //todo: add option for 'animation' change
-        public DialogueNode():base(){}
-        public DialogueNode(string name, string line):base(name,line){}
+        //what did I mean by 'animation'? sprite expression?
+        private string _expression;
+        public readonly bool ExpressionUpdate;
+        public string Expression
+        {
+            get => _expression;
+        }
+
+        public DialogueNode():base(){_isRoot = false;}
+
+        public DialogueNode(string name, string line, string expression = "") : base(name, line)
+        {
+            _expression = expression;
+            _isRoot = false;
+            ExpressionUpdate = String.IsNullOrEmpty(_expression) || String.IsNullOrWhiteSpace(_expression);
+        }
     }
 
     /*The line before a choice appears. This is for lines that lead to a choice selection for the player.*/
@@ -131,11 +239,13 @@ namespace Dialogue_Scripts
         public ChoiceNode() : base()
         {
             choices = new List<SelectNode>(2);
+            _isRoot = false;
         }
 
         public ChoiceNode(string name, string line) : base(name, line)
         {
             choices = new List<SelectNode>(2);
+            _isRoot = false;
         }
         
         
@@ -148,6 +258,7 @@ namespace Dialogue_Scripts
 
         public SelectNode() : base()
         {
+            _isRoot = false;
             seen = false;
         }
 
@@ -156,7 +267,16 @@ namespace Dialogue_Scripts
             name = "NONE";
             this.line = line;
             this.canDisappear = canDisappear;
+            _isRoot = false;
             seen = false;
+        }
+    }
+
+    public class RootNode : NodeType
+    {
+        public RootNode() : base("Root", "This is the root node")
+        {
+            _isRoot = true;
         }
     }
     
@@ -164,6 +284,8 @@ namespace Dialogue_Scripts
     {
         protected string name, line;
         protected NodeType nextLine;
+        protected bool _isRoot;
+        public bool IsRoot { get; }
 
         //getter and setter, prevents the value from being overriden once set (it shouldn't ever be overriden anyways)
         public NodeType NextLine
